@@ -2,13 +2,15 @@ import logging
 import asyncio
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, CallbackQuery
 from config import TOKEN
-from db import init_db, add_user, get_available_keys, buy_key
+from db import init_db, add_user, get_all_products, get_product_by_id, buy_key_by_product_id
 
 logging.basicConfig(level=logging.INFO)
 
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
+
 
 @dp.message(Command("start"))
 async def start(msg: types.Message):
@@ -20,39 +22,85 @@ async def start(msg: types.Message):
         "📦 /buy — купить ключ\n💰 /balance — баланс\n👥 /ref — твоя реферальная ссылка"
     )
 
+
 @dp.message(Command("buy"))
-async def show_keys(msg: types.Message):
-    keys = get_available_keys()
-    if not keys:
-        await msg.answer("❌ Нет доступных ключей.")
+async def list_products(msg: types.Message):
+    products = get_all_products()
+    if not products:
+        await msg.answer("❌ Нет доступных товаров для покупки.")
         return
 
-    text = "\n".join([f"{k[0]}. 🔑 {k[1][:4]}****" for k in keys])
-    await msg.answer(f"📦 Доступные ключи:\n{text}\n\n💬 Напиши номер ключа для покупки.")
+    text = "Вот список доступных для покупки товаров:"
+    buttons = [
+        [InlineKeyboardButton(text=p[1], callback_data=f"product_{p[0]}")] for p in products
+    ]
+    keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
 
-@dp.message(lambda m: m.text.isdigit())
-async def handle_buy(msg: types.Message):
-    key_id = int(msg.text)
-    key = buy_key(key_id)
+    await msg.answer(text, reply_markup=keyboard)
+
+
+@dp.callback_query(lambda c: c.data and c.data.startswith("product_"))
+async def show_product_detail(callback: CallbackQuery):
+    product_id = int(callback.data.split("_")[1])
+    product = get_product_by_id(product_id)
+    if not product:
+        await callback.answer("Товар не найден.", show_alert=True)
+        return
+
+    text = (
+        f"🛒 <b>{product[1]}</b>\n\n"
+        f"{product[2] or 'Описание отсутствует.'}\n\n"
+        f"💰 Цена: {product[3]} руб."
+    )
+
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="Купить", callback_data=f"buy_{product_id}"),
+                InlineKeyboardButton(text="Назад", callback_data="back_to_list"),
+            ]
+        ]
+    )
+
+    await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
+    await callback.answer()
+
+
+@dp.callback_query(lambda c: c.data and c.data.startswith("buy_"))
+async def buy_product_key(callback: CallbackQuery):
+    product_id = int(callback.data.split("_")[1])
+    key = buy_key_by_product_id(product_id, callback.from_user.id)
     if not key:
-        await msg.answer("❌ Ключ не найден или уже куплен.")
-    else:
-        await msg.answer(f"✅ Покупка успешна!\nВот твой ключ:\n`{key}`", parse_mode='Markdown')
+        await callback.answer("Ключи для этого товара закончились или товар не найден.", show_alert=True)
+        return
 
-@dp.message(Command("ref"))
-async def ref_link(msg: types.Message):
-    me = await bot.get_me()
-    link = f"https://t.me/{me.username}?start={msg.from_user.id}"
-    await msg.answer(f"👥 Твоя реферальная ссылка:\n{link}")
+    text = f"✅ Покупка успешна!\nВот твой ключ:\n`{key}`"
+    await callback.message.edit_text(text, parse_mode="Markdown")
+    await callback.answer()
 
-@dp.message(lambda m: m.content_type == 'photo')
-async def handle_payment(msg: types.Message):
-    await msg.answer("📸 Скриншот получен! Админ проверит и пополнит баланс.")
+
+@dp.callback_query(lambda c: c.data == "back_to_list")
+async def back_to_product_list(callback: CallbackQuery):
+    products = get_all_products()
+    if not products:
+        await callback.message.edit_text("❌ Нет доступных товаров для покупки.", reply_markup=None)
+        await callback.answer()
+        return
+
+    text = "Вот список доступных для покупки товаров:"
+    buttons = [
+        [InlineKeyboardButton(text=p[1], callback_data=f"product_{p[0]}")] for p in products
+    ]
+    keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
+
+    await callback.message.edit_text(text, reply_markup=keyboard)
+    await callback.answer()
+
 
 async def main():
-    init_db()  # создаём таблицы, если их нет
-    # dp.include_router(dp)  # регистрируем роутеры
+    init_db()
     await dp.start_polling(bot)
+
 
 if __name__ == "__main__":
     asyncio.run(main())
