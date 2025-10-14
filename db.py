@@ -1,7 +1,6 @@
 import sqlite3
 from config import DB_PATH
 
-
 def init_db():
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
@@ -11,7 +10,8 @@ def init_db():
         telegram_id INTEGER UNIQUE,
         balance REAL DEFAULT 0,
         referrer INTEGER,
-        role TEXT DEFAULT 'user'
+        role TEXT DEFAULT 'user',
+        referral_bonus_given INTEGER DEFAULT 0
     )''')
 
     c.execute('''CREATE TABLE IF NOT EXISTS products (
@@ -28,19 +28,102 @@ def init_db():
         user_id INTEGER
     )''')
 
+    c.execute('''CREATE TABLE IF NOT EXISTS payments (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER,
+        amount REAL,
+        payment_id TEXT,
+        status TEXT DEFAULT 'на рассмотрении',
+        order_name TEXT,
+        details TEXT,
+        full_receipt TEXT
+    )''')
+
     conn.commit()
     conn.close()
-
 
 def add_user(telegram_id, referrer=None):
     conn = sqlite3.connect(DB_PATH)
-    conn.execute(
-        "INSERT OR IGNORE INTO users (telegram_id, referrer) VALUES (?, ?)",
-        (telegram_id, referrer)
-    )
+    c = conn.cursor()
+    c.execute("SELECT id FROM users WHERE telegram_id = ?", (telegram_id,))
+    if c.fetchone() is None:
+        c.execute(
+            "INSERT INTO users (telegram_id, referrer) VALUES (?, ?)", (telegram_id, referrer)
+        )
     conn.commit()
     conn.close()
 
+def fill_test_data():
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+
+    products = [
+        ("Программа А", "Описание Программы А", 500),
+        ("Программа Б", "Описание Программы Б", 750),
+        ("Программа В", "Описание Программы В", 1000),
+    ]
+
+    for name, desc, price in products:
+        c.execute("INSERT OR IGNORE INTO products (name, description, price) VALUES (?, ?, ?)",
+                  (name, desc, price))
+
+    conn.commit()
+
+    c.execute("SELECT id, name FROM products")
+    prod_ids = {name: pid for pid, name in c.fetchall()}
+
+    keys = []
+    for i in range(1, 21):
+        prod_name = "Программа А" if i <= 7 else ("Программа Б" if i <= 14 else "Программа В")
+        key_str = f"KEY-{1000 + i}-AAAA-BBBB-{i:04d}"
+        keys.append((prod_ids[prod_name], key_str, None))
+
+    c.executemany("INSERT OR IGNORE INTO keys (product_id, key, user_id) VALUES (?, ?, ?)", keys)
+
+    conn.commit()
+    conn.close()
+
+def get_balance(telegram_id):
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("SELECT balance FROM users WHERE telegram_id = ?", (telegram_id,))
+    row = c.fetchone()
+    conn.close()
+    if row:
+        return float(row[0])
+    return 0.0
+
+def update_balance(telegram_id, amount):
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("UPDATE users SET balance = balance + ? WHERE telegram_id = ?", (amount, telegram_id))
+    conn.commit()
+    conn.close()
+
+def create_payment(user_id, amount, order_name, details):
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute('''INSERT INTO payments (user_id, amount, order_name, details) VALUES (?, ?, ?, ?)''',
+              (user_id, amount, order_name, details))
+    conn.commit()
+    payment_id = c.lastrowid
+    conn.close()
+    return payment_id
+
+def get_payment(payment_id):
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("SELECT * FROM payments WHERE id = ?", (payment_id,))
+    payment = c.fetchone()
+    conn.close()
+    return payment
+
+def set_payment_status(payment_id, status):
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("UPDATE payments SET status = ? WHERE id = ?", (status, payment_id))
+    conn.commit()
+    conn.close()
 
 def get_all_products():
     conn = sqlite3.connect(DB_PATH)
@@ -48,29 +131,66 @@ def get_all_products():
     conn.close()
     return products
 
-
 def get_product_by_id(product_id):
     conn = sqlite3.connect(DB_PATH)
-    product = conn.execute(
-        "SELECT id, name, description, price FROM products WHERE id = ?", (product_id,)
-    ).fetchone()
+    product = conn.execute("SELECT id, name, description, price FROM products WHERE id = ?", (product_id,)).fetchone()
     conn.close()
     return product
 
-
-def buy_key_by_product_id(product_id, user_id):
+def buy_key_by_product_id(product_id, user_telegram_id):
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
-    c.execute(
-        "SELECT id, key FROM keys WHERE product_id = ? AND user_id IS NULL LIMIT 1",
-        (product_id,)
-    )
+    c.execute("SELECT id, key FROM keys WHERE product_id = ? AND user_id IS NULL LIMIT 1", (product_id,))
     row = c.fetchone()
     if row:
         key_id, key_value = row
-        c.execute("UPDATE keys SET user_id = ? WHERE id = ?", (user_id, key_id))
+        c.execute("SELECT balance FROM users WHERE telegram_id = ?", (user_telegram_id,))
+        user_balance_row = c.fetchone()
+        c.execute("SELECT price FROM products WHERE id = ?", (product_id,))
+        price = c.fetchone()[0]
+        if not user_balance_row or user_balance_row[0] < price:
+            conn.close()
+            return None
+        c.execute("UPDATE users SET balance = balance - ? WHERE telegram_id = ?", (price, user_telegram_id))
+        c.execute("UPDATE keys SET user_id = ? WHERE id = ?", (user_telegram_id, key_id))
         conn.commit()
         conn.close()
         return key_value
     conn.close()
     return None
+
+def check_and_grant_referral_bonus(user_telegram_id):
+    BONUS_SUM = 100
+    REFERRAL_THRESHOLD = 2000
+
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+
+    c.execute("SELECT id, referrer, referral_bonus_given FROM users WHERE telegram_id = ?", (user_telegram_id,))
+    user_data = c.fetchone()
+    if not user_data:
+        conn.close()
+        return
+    user_id, referrer_id, bonus_given = user_data
+
+    if referrer_id is None or bonus_given:
+        conn.close()
+        return
+
+    c.execute("""
+        SELECT SUM(p.price) FROM keys k
+        JOIN products p ON k.product_id = p.id
+        WHERE k.user_id = ?
+    """, (user_id,))
+    total_sum = c.fetchone()[0] or 0
+
+    if total_sum >= REFERRAL_THRESHOLD:
+        c.execute("SELECT telegram_id FROM users WHERE id = ?", (referrer_id,))
+        referrer_telegram = c.fetchone()
+        if referrer_telegram:
+            c.execute(
+                "UPDATE users SET balance = balance + ?, referral_bonus_given = 1 WHERE id = ?",
+                (BONUS_SUM, referrer_id)
+            )
+            conn.commit()
+    conn.close()

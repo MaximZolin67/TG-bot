@@ -4,13 +4,25 @@ from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, CallbackQuery
 from config import TOKEN
-from db import init_db, add_user, get_all_products, get_product_by_id, buy_key_by_product_id
+from db import (
+    init_db,
+    add_user,
+    get_all_products,
+    get_product_by_id,
+    buy_key_by_product_id,
+    create_payment,
+    get_payment,
+    set_payment_status,
+    get_balance,
+    update_balance,
+    check_and_grant_referral_bonus,
+    fill_test_data,
+)
 
 logging.basicConfig(level=logging.INFO)
 
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
-
 
 @dp.message(Command("start"))
 async def start(msg: types.Message):
@@ -22,6 +34,16 @@ async def start(msg: types.Message):
         "📦 /buy — купить ключ\n💰 /balance — баланс\n👥 /ref — твоя реферальная ссылка"
     )
 
+@dp.message(Command("init_testdata"))
+async def init_test(msg: types.Message):
+    fill_test_data()
+    await msg.answer("Тестовые продукты и ключи успешно добавлены.")
+
+@dp.message(Command("balance"))
+async def show_balance(msg: types.Message):
+    check_and_grant_referral_bonus(msg.from_user.id)
+    balance = get_balance(msg.from_user.id)
+    await msg.answer(f"💰 Ваш текущий баланс: {balance} рублей.")
 
 @dp.message(Command("buy"))
 async def list_products(msg: types.Message):
@@ -38,7 +60,6 @@ async def list_products(msg: types.Message):
 
     await msg.answer(text, reply_markup=keyboard)
 
-
 @dp.callback_query(lambda c: c.data and c.data.startswith("product_"))
 async def show_product_detail(callback: CallbackQuery):
     product_id = int(callback.data.split("_")[1])
@@ -53,54 +74,84 @@ async def show_product_detail(callback: CallbackQuery):
         f"💰 Цена: {product[3]} руб."
     )
 
-    keyboard = InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                InlineKeyboardButton(text="Купить", callback_data=f"buy_{product_id}"),
-                InlineKeyboardButton(text="Назад", callback_data="back_to_list"),
-            ]
-        ]
-    )
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="Купить", callback_data=f"buy_confirm_{product[0]}"),
+         InlineKeyboardButton(text="Назад", callback_data="back_to_list")]
+    ])
 
     await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
     await callback.answer()
 
-
-@dp.callback_query(lambda c: c.data and c.data.startswith("buy_"))
-async def buy_product_key(callback: CallbackQuery):
-    product_id = int(callback.data.split("_")[1])
-    key = buy_key_by_product_id(product_id, callback.from_user.id)
-    if not key:
-        await callback.answer("Ключи для этого товара закончились или товар не найден.", show_alert=True)
+@dp.callback_query(lambda c: c.data and c.data.startswith("buy_confirm_"))
+async def show_payment_options(callback: CallbackQuery):
+    product_id = int(callback.data.split("_")[2])
+    product = get_product_by_id(product_id)
+    if not product:
+        await callback.answer("Товар не найден.", show_alert=True)
         return
 
-    text = f"✅ Покупка успешна!\nВот твой ключ:\n`{key}`"
-    await callback.message.edit_text(text, parse_mode="Markdown")
-    await callback.answer()
+    payment_details = (
+        "Реквизиты для оплаты:\n"
+        "Банк: ТестБанк\n"
+        "Реквизиты: 1234 5678 9012 3456\n"
+        "Получатель: Тестовый Получатель\n"
+        "Назначение: Оплата товара\n\n"
+        "Проверка платежа происходит вручную до 2 часов (в зависимости от работы оператора).\n"
+        "Отправляйте ПОЛНУЮ квитанцию ФОТКОЙ после оплаты."
+    )
 
+    user_id = callback.from_user.id
+    amount = product[3]
+    order_name = product[1]
+    payment_id = create_payment(user_id, amount, order_name, payment_details)
 
-@dp.callback_query(lambda c: c.data == "back_to_list")
-async def back_to_product_list(callback: CallbackQuery):
-    products = get_all_products()
-    if not products:
-        await callback.message.edit_text("❌ Нет доступных товаров для покупки.", reply_markup=None)
-        await callback.answer()
-        return
+    text = (
+        f"Оплата товара\n\n"
+        f"Номер счета: {payment_id}\n"
+        f"Сумма к оплате: {amount} рублей\n"
+        f"Статус заказа: на рассмотрении\n\n"
+        f"{payment_details}"
+    )
 
-    text = "Вот список доступных для покупки товаров:"
-    buttons = [
-        [InlineKeyboardButton(text=p[1], callback_data=f"product_{p[0]}")] for p in products
-    ]
-    keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="Подтвердить оплату", callback_data=f"confirm_payment_{payment_id}")],
+        [InlineKeyboardButton(text="Назад", callback_data=f"product_{product_id}")]
+    ])
 
     await callback.message.edit_text(text, reply_markup=keyboard)
     await callback.answer()
 
+@dp.callback_query(lambda c: c.data and c.data.startswith("confirm_payment_"))
+async def confirm_payment(callback: CallbackQuery):
+    payment_id = int(callback.data.split("_")[2])
+    payment = get_payment(payment_id)
+    if not payment:
+        await callback.answer("Платеж не найден.", show_alert=True)
+        return
+
+    set_payment_status(payment_id, "Оплачено")
+    user_id = payment[1]
+    amount = payment[2]
+    update_balance(user_id, amount)
+
+    await callback.message.edit_text(
+        f"Платеж №{payment_id} подтвержден.\nБаланс успешно пополнен на {amount} рублей."
+    )
+    await callback.answer()
+
+@dp.callback_query(lambda c: c.data == "back_to_list")
+async def back_to_list(callback: CallbackQuery):
+    products = get_all_products()
+    text = "Вот список доступных для покупки товаров:" if products else "❌ Нет доступных товаров для покупки."
+    buttons = [[InlineKeyboardButton(text=p[1], callback_data=f"product_{p[0]}")] for p in products]
+    keyboard = InlineKeyboardMarkup(inline_keyboard=buttons) if products else None
+
+    await callback.message.edit_text(text, reply_markup=keyboard)
+    await callback.answer()
 
 async def main():
     init_db()
     await dp.start_polling(bot)
-
 
 if __name__ == "__main__":
     asyncio.run(main())
