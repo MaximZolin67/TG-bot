@@ -43,7 +43,11 @@ async def init_test(msg: types.Message):
 async def show_balance(msg: types.Message):
     check_and_grant_referral_bonus(msg.from_user.id)
     balance = get_balance(msg.from_user.id)
-    await msg.answer(f"💰 Ваш текущий баланс: {balance} рублей.")
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="Пополнить баланс", callback_data="add_balance")]
+    ])
+
+    await msg.answer(f"💰 Ваш текущий баланс: {balance} рублей.", reply_markup=keyboard)
 
 @dp.message(Command("buy"))
 async def list_products(msg: types.Message):
@@ -84,6 +88,8 @@ async def show_product_detail(callback: CallbackQuery):
 
 @dp.callback_query(lambda c: c.data and c.data.startswith("buy_confirm_"))
 async def show_payment_options(callback: CallbackQuery):
+    # если баланс достаточно, тогда покупка
+    # если нет, то показать кнопку  [InlineKeyboardButton(text="Пополнить баланс", callback_data="add_balance")]
     product_id = int(callback.data.split("_")[2])
     product = get_product_by_id(product_id)
     if not product:
@@ -120,6 +126,23 @@ async def show_payment_options(callback: CallbackQuery):
 
     await callback.message.edit_text(text, reply_markup=keyboard)
     await callback.answer()
+
+@dp.callback_query(lambda c: c.data and c.data.startswith("add_balance"))
+async def add_balance(callback: CallbackQuery):
+    text = "Выберите предпочтительный способ пополнения баланса, обратите внимание, что некоторые платежные системы могут брать дополнительную комиссию:"
+    buttons = [
+        [InlineKeyboardButton(text='Ручная проверка', callback_data="input_balance")]
+    ]
+    keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
+    await callback.message.edit_text(text, reply_markup=keyboard)
+    await callback.answer()
+
+@dp.callback_query(lambda c: c.data and c.data.startswith("input_balance"))
+async def add_balance(callback: CallbackQuery):
+    text = "Введите сумму пополнения, от 100 ₽ до 99 999 ₽:"
+    await callback.message.edit_text(text)
+    await callback.answer()
+    # после ввода вызвать buy_confirm_, но переделать его
 
 @dp.callback_query(lambda c: c.data and c.data.startswith("confirm_payment_"))
 async def confirm_payment(callback: CallbackQuery):
