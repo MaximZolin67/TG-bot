@@ -134,9 +134,22 @@ async def show_payment_options(callback: CallbackQuery):
     if balance >= price:
         key = buy_key_by_product_id(product_id, user_id)
         if key:
-            await callback.message.edit_text(f"✅ Покупка успешна!\nВаш ключ:\n<code>{key}</code>", parse_mode="HTML", reply_markup=MAIN_MENU)
+            await callback.message.edit_text(
+                f"✅ Покупка успешна!\nВаш ключ:\n<code>{key}</code>",
+                parse_mode="HTML"
+            )
+            await bot.send_message(
+                callback.from_user.id,
+                "Главное меню 👇",
+                reply_markup=MAIN_MENU
+            )
         else:
-            await callback.message.edit_text("❌ Ключей для этого товара больше нет.", reply_markup=MAIN_MENU)
+            await callback.message.edit_text("❌ Ключей для этого товара больше нет.")
+            await bot.send_message(
+                callback.from_user.id,
+                "Главное меню 👇",
+                reply_markup=MAIN_MENU
+            )
         await callback.answer()
         return
 
@@ -219,7 +232,11 @@ async def confirm_payment(callback: CallbackQuery):
     update_balance(user_id, amount)
 
     await callback.message.edit_text(
-        f"✅ Платёж №{payment_id} подтверждён.\nБаланс пополнен на {amount} ₽.",
+        f"✅ Платёж №{payment_id} подтверждён.\nБаланс пополнен на {amount} ₽."
+    )
+    await bot.send_message(
+        callback.from_user.id,
+        "Главное меню 👇",
         reply_markup=MAIN_MENU
     )
     await callback.answer()
