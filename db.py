@@ -53,36 +53,6 @@ def add_user(telegram_id, referrer=None):
     conn.commit()
     conn.close()
 
-def fill_test_data():
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-
-    products = [
-        ("Программа А", "Описание Программы А", 500),
-        ("Программа Б", "Описание Программы Б", 750),
-        ("Программа В", "Описание Программы В", 1000),
-    ]
-
-    for name, desc, price in products:
-        c.execute("INSERT OR IGNORE INTO products (name, description, price) VALUES (?, ?, ?)",
-                  (name, desc, price))
-
-    conn.commit()
-
-    c.execute("SELECT id, name FROM products")
-    prod_ids = {name: pid for pid, name in c.fetchall()}
-
-    keys = []
-    for i in range(1, 21):
-        prod_name = "Программа А" if i <= 7 else ("Программа Б" if i <= 14 else "Программа В")
-        key_str = f"KEY-{1000 + i}-AAAA-BBBB-{i:04d}"
-        keys.append((prod_ids[prod_name], key_str, None))
-
-    c.executemany("INSERT OR IGNORE INTO keys (product_id, key, user_id) VALUES (?, ?, ?)", keys)
-
-    conn.commit()
-    conn.close()
-
 def get_balance(telegram_id):
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()

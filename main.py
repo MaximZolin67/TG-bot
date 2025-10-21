@@ -22,7 +22,6 @@ from db import (
     get_balance,
     update_balance,
     check_and_grant_referral_bonus,
-    fill_test_data,
 )
 
 logging.basicConfig(level=logging.INFO)
@@ -51,12 +50,6 @@ async def start(msg: types.Message):
         "Выберите действие через меню снизу 👇",
         reply_markup=MAIN_MENU
     )
-
-# ========= /init_testdata =========
-@dp.message(Command("init_testdata"))
-async def init_test(msg: types.Message):
-    fill_test_data()
-    await msg.answer("Тестовые продукты и ключи добавлены.", reply_markup=MAIN_MENU)
 
 # ========= Обработка нажатий кнопок из меню =========
 @dp.message(F.text == "💰 Баланс")
