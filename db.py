@@ -42,6 +42,29 @@ def init_db():
     conn.commit()
     conn.close()
 
+def is_admin(telegram_id):
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("SELECT role FROM users WHERE telegram_id = ?", (telegram_id,))
+    row = c.fetchone()
+    conn.close()
+    return row and row[0] == "admin"
+
+def get_pending_payments():
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("""
+        SELECT id, user_id, amount, order_name, status
+        FROM payments
+        WHERE status = 'На рассмотрении'
+        ORDER BY id DESC
+    """)
+    rows = c.fetchall()
+    conn.close()
+    return rows
+
+
+
 def add_user(telegram_id, referrer=None):
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()

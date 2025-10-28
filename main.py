@@ -1,5 +1,6 @@
 import logging
 import asyncio
+from math import ceil
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
 from aiogram.types import (
@@ -22,6 +23,8 @@ from db import (
     get_balance,
     update_balance,
     check_and_grant_referral_bonus,
+    get_pending_payments,
+    is_admin,
 )
 
 logging.basicConfig(level=logging.INFO)
@@ -204,28 +207,26 @@ async def add_balance(callback: CallbackQuery):
             f"{payment_details}"
         )
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="✅ Подтвердить оплату", callback_data=f"confirm_payment_{payment_id}")],
+            [InlineKeyboardButton(text="✅ Подтвердить оплату", callback_data=f"confirm_user_payment_{payment_id}")],
             [InlineKeyboardButton(text="↩️ Назад", callback_data="balance_back")]
         ])
         await msg.answer(text, reply_markup=keyboard)
         dp.message.handlers.unregister(handle_balance_input)
 
 # ========= Подтверждение оплаты =========
-@dp.callback_query(lambda c: c.data and c.data.startswith("confirm_payment_"))
+@dp.callback_query(lambda c: c.data and c.data.startswith("confirm_user_payment_"))
 async def confirm_payment(callback: CallbackQuery):
-    payment_id = int(callback.data.split("_")[2])
+    payment_id = int(callback.data.split("_")[-1])
     payment = get_payment(payment_id)
     if not payment:
         await callback.answer("Платёж не найден.", show_alert=True)
         return
 
-    set_payment_status(payment_id, "Оплачено")
-    user_id = payment[1]
-    amount = payment[2]
-    update_balance(user_id, amount)
+    set_payment_status(payment_id, "На рассмотрении")
 
     await callback.message.edit_text(
-        f"✅ Платёж №{payment_id} подтверждён.\nБаланс пополнен на {amount} ₽."
+        "✅ Ваша заявка на рассмотрении.\n"
+        "Ожидайте подтверждения администратора."
     )
     await bot.send_message(
         callback.from_user.id,
@@ -233,6 +234,34 @@ async def confirm_payment(callback: CallbackQuery):
         reply_markup=MAIN_MENU
     )
     await callback.answer()
+
+# ========= Подтверждение платежа администратором =========
+@dp.message(Command("confirm"))
+async def admin_confirm_payment(msg: types.Message):
+    args = msg.text.split()
+    if len(args) < 2 or not args[1].isdigit():
+        await msg.answer("⚠️ Использование: /confirm <payment_id>")
+        return
+
+    payment_id = int(args[1])
+
+    if not is_admin(msg.from_user.id):
+        await msg.answer("❌ Только администратор может подтверждать платежи.")
+        return
+
+    # Получаем платёж
+    payment = get_payment(payment_id)
+    if not payment:
+        await msg.answer("❌ Платёж не найден.")
+        return
+
+    set_payment_status(payment_id, "Оплачено")
+    user_id = payment[1]
+    amount = payment[2]
+    update_balance(user_id, amount)
+
+    await msg.answer(f"✅ Платёж №{payment_id} подтверждён.\nБаланс пользователя {user_id} пополнен на {amount} ₽.")
+
 
 # ========= Навигация назад =========
 @dp.callback_query(lambda c: c.data == "back_to_list")
@@ -252,6 +281,99 @@ async def back_to_balance(callback: CallbackQuery):
     ])
     await callback.message.edit_text(f"💰 Ваш баланс: {balance} ₽", reply_markup=keyboard)
     await callback.answer()
+
+# ========= Просмотр платежей администратором =========
+# @dp.message(Command("payments"))
+# async def list_pending_payments(msg: types.Message):
+#     user_id = msg.from_user.id
+#
+#     # Проверим, является ли пользователь админом
+#     if not is_admin(user_id):
+#         await msg.answer("❌ У вас нет прав для просмотра этой информации.")
+#         return
+#
+#     payments = get_pending_payments()
+#     if not payments:
+#         await msg.answer("✅ Нет платежей со статусом 'на рассмотрении'.")
+#         return
+#
+#     text_lines = []
+#     for p in payments:
+#         payment_id, user_id, amount, order_name, status = p
+#         text_lines.append(
+#             f"💳 <b>Платёж #{payment_id}</b>\n"
+#             f"👤 User ID: {user_id}\n"
+#             f"📦 {order_name}\n"
+#             f"💰 {amount} ₽\n"
+#             f"📄 Статус: {status}\n"
+#             f"-----------------------------"
+#         )
+#
+#     text = "\n".join(text_lines)
+#     await msg.answer(text, parse_mode="HTML")
+#
+# @dp.message(Command("payments"))
+# async def list_pending_payments(msg: types.Message):
+#     if not is_admin(msg.from_user.id):
+#         await msg.answer("❌ У вас нет прав для просмотра этой информации.")
+#         return
+#
+#     payments = get_pending_payments()
+#     if not payments:
+#         await msg.answer("✅ Нет платежей со статусом 'на рассмотрении'.")
+#         return
+#
+#     await send_payments_page(msg.chat.id, payments, 1)
+#
+#
+# @dp.callback_query(lambda c: c.data and c.data.startswith("payments_page_"))
+# async def paginate_payments(callback: CallbackQuery):
+#     if not is_admin(callback.from_user.id):
+#         await callback.answer("❌ Только администратор может просматривать платежи.", show_alert=True)
+#         return
+#
+#     page = int(callback.data.split("_")[-1])
+#     payments = get_pending_payments()
+#     await send_payments_page(callback.message.chat.id, payments, page, callback.message)
+#     await callback.answer()
+#
+#
+# async def send_payments_page(chat_id: int, payments: list, page: int, message: types.Message | None = None):
+#     per_page = 10
+#     total_pages = ceil(len(payments) / per_page)
+#     start = (page - 1) * per_page
+#     end = start + per_page
+#     subset = payments[start:end]
+#
+#     text_lines = []
+#     for p in subset:
+#         payment_id, user_id, amount, order_name, status = p
+#         text_lines.append(
+#             f"💳 <b>Платёж #{payment_id}</b>\n"
+#             f"👤 User ID: {user_id}\n"
+#             f"📦 {order_name}\n"
+#             f"💰 {amount} ₽\n"
+#             f"📄 Статус: {status}\n"
+#             f"-----------------------------"
+#         )
+#
+#     text = "\n".join(text_lines)
+#     text += f"\n📄 Страница {page}/{total_pages}"
+#
+#     # Кнопки пагинации
+#     buttons = []
+#     if page > 1:
+#         buttons.append(InlineKeyboardButton(text="⬅️ Назад", callback_data=f"payments_page_{page - 1}"))
+#     if page < total_pages:
+#         buttons.append(InlineKeyboardButton(text="➡️ Вперёд", callback_data=f"payments_page_{page + 1}"))
+#
+#     keyboard = InlineKeyboardMarkup(inline_keyboard=[buttons] if buttons else [])
+#
+#     if message:
+#         await message.edit_text(text, parse_mode="HTML", reply_markup=keyboard)
+#     else:
+#         await bot.send_message(chat_id, text, parse_mode="HTML", reply_markup=keyboard)
+
 
 # ========= MAIN =========
 async def main():
