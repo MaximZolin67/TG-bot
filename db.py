@@ -103,6 +103,13 @@ def create_payment(user_id, amount, order_name, details):
     conn.close()
     return payment_id
 
+def save_receipt(payment_id, file_url):
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("UPDATE payments SET full_receipt = ? WHERE id = ?", (file_url, payment_id))
+    conn.commit()
+    conn.close()
+
 def get_payment(payment_id):
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
