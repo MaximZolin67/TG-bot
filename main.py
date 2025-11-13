@@ -3,6 +3,7 @@ import asyncio
 from math import ceil
 from aiogram import Bot, Dispatcher, types, F
 from pydrive2.auth import GoogleAuth
+from io import BytesIO
 from pydrive2.drive import GoogleDrive
 from aiogram.filters import Command
 from aiogram.types import (
@@ -187,14 +188,14 @@ async def show_payment_options(callback: CallbackQuery):
 
 @dp.callback_query(lambda c: c.data == "add_balance")
 async def add_balance(callback: CallbackQuery):
-    await callback.message.edit_text("💳 Введите сумму пополнения (от 100 до 99999 ₽):")
+    await callback.message.edit_text("💳 Введите сумму пополнения (от 100 ₽):")
     await callback.answer()
 
-    @dp.message(F.text.regexp(r"^\d{3,5}$"))
+    @dp.message(F.text.regexp(r"^\d{3,20}$"))
     async def handle_balance_input(msg: types.Message):
         amount = int(msg.text)
-        if not (100 <= amount <= 99999):
-            await msg.answer("❌ Сумма должна быть от 100 до 99999 ₽.")
+        if not (100 <= amount):
+            await msg.answer("❌ Сумма должна быть от 100 ₽.")
             return
 
         payment_details = (
@@ -223,21 +224,24 @@ async def add_balance(callback: CallbackQuery):
         # Регистрируем ожидание фото
         @dp.message(F.photo)
         async def get_photo(photo_msg: types.Message):
+            # Получаем файл с Telegram
             file = await photo_msg.bot.get_file(photo_msg.photo[-1].file_id)
             img_bytes = await photo_msg.bot.download_file(file.file_path)
 
-            # 👉 Загружаем в Google Drive
+            # Создаём временный бинарный объект
+            image_data = BytesIO(img_bytes.read())
+
+            # 👉 Загружаем в Google Drive корректно
             gfile = drive.CreateFile({'title': f"payment_{payment_id}.jpg"})
-            gfile.SetContentString(img_bytes.read().hex())
+            gfile.content = image_data  # передаём поток байтов напрямую
             gfile.Upload()
             gfile.InsertPermission({"role": "reader", "type": "anyone"})
             file_url = gfile['alternateLink']
 
-            # 👉 Сохраняем ссылку в БД
+            # Сохраняем ссылку в БД
             save_receipt(payment_id, file_url)
 
-
-            # 👉 Показываем кнопку подтверждения
+            # Показываем кнопки
             keyboard = InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text="✅ Подтвердить оплату", callback_data=f"confirm_user_payment_{payment_id}")],
                 [InlineKeyboardButton(text="↩️ Назад", callback_data="balance_back")]
@@ -248,10 +252,10 @@ async def add_balance(callback: CallbackQuery):
                 reply_markup=keyboard
             )
 
-            # Отписываем вложенные хендлеры
-            # dp.message.handlers.remove(get_photo)
-            # dp.message.handlers.remove(handle_balance_input)
-
+            # Снимаем временные хендлеры
+            dp.message.middleware.unregister(get_photo)
+            dp.message.middleware.unregister(handle_balance_input)
+            
 # ========= Подтверждение оплаты =========
 @dp.callback_query(lambda c: c.data and c.data.startswith("confirm_user_payment_"))
 async def confirm_payment(callback: CallbackQuery):
@@ -321,36 +325,6 @@ async def back_to_balance(callback: CallbackQuery):
     await callback.message.edit_text(f"💰 Ваш баланс: {balance} ₽", reply_markup=keyboard)
     await callback.answer()
 
-# ========= Просмотр платежей администратором =========
-@dp.message(Command("payments"))
-async def list_pending_payments(msg: types.Message):
-    user_id = msg.from_user.id
-
-    # Проверим, является ли пользователь админом
-    if not is_admin(user_id):
-        await msg.answer("❌ У вас нет прав для просмотра этой информации.")
-        return
-
-    payments = get_pending_payments()
-    if not payments:
-        await msg.answer("✅ Нет платежей со статусом 'на рассмотрении'.")
-        return
-
-    text_lines = []
-    for p in payments:
-        payment_id, user_id, amount, order_name, status = p
-        text_lines.append(
-            f"💳 <b>Платёж #{payment_id}</b>\n"
-            f"👤 User ID: {user_id}\n"
-            f"📦 {order_name}\n"
-            f"💰 {amount} ₽\n"
-            f"📄 Статус: {status}\n"
-            f"-----------------------------"
-        )
-
-    text = "\n".join(text_lines)
-    await msg.answer(text, parse_mode="HTML")
-
 @dp.message(Command("payments"))
 async def list_pending_payments(msg: types.Message):
     if not is_admin(msg.from_user.id):
@@ -368,7 +342,7 @@ async def list_pending_payments(msg: types.Message):
 @dp.callback_query(lambda c: c.data and c.data.startswith("payments_page_"))
 async def paginate_payments(callback: CallbackQuery):
     if not is_admin(callback.from_user.id):
-        await callback.answer("❌ Только администратор может просматривать платежи.", show_alert=True)
+        await callback.answer("❌ У вас нет прав для просмотра этой информации.", show_alert=True)
         return
 
     page = int(callback.data.split("_")[-1])
@@ -386,13 +360,14 @@ async def send_payments_page(chat_id: int, payments: list, page: int, message: t
 
     text_lines = []
     for p in subset:
-        payment_id, user_id, amount, order_name, status = p
+        payment_id, user_id, amount, order_name, status, full_receipt = p
         text_lines.append(
             f"💳 <b>Платёж #{payment_id}</b>\n"
             f"👤 User ID: {user_id}\n"
             f"📦 {order_name}\n"
             f"💰 {amount} ₽\n"
             f"📄 Статус: {status}\n"
+            f" ссылка на диск: {full_receipt}\n"
             f"-----------------------------"
         )
 

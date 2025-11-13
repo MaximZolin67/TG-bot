@@ -54,7 +54,7 @@ def get_pending_payments():
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute("""
-        SELECT id, user_id, amount, order_name, status
+        SELECT id, user_id, amount, order_name, status, full_receipt
         FROM payments
         WHERE status = 'На рассмотрении'
         ORDER BY id DESC
@@ -63,7 +63,17 @@ def get_pending_payments():
     conn.close()
     return rows
 
-
+def get_all_payments():
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("""
+        SELECT id, user_id, amount, order_name, status, full_receipt
+        FROM payments
+        ORDER BY id DESC
+    """)
+    rows = c.fetchall()
+    conn.close()
+    return rows
 
 def add_user(telegram_id, referrer=None):
     conn = sqlite3.connect(DB_PATH)
