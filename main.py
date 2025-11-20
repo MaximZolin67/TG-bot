@@ -36,12 +36,6 @@ logging.basicConfig(level=logging.INFO)
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
 
-gauth = GoogleAuth()
-gauth.LoadCredentialsFile("token.json")
-if gauth.access_token_expired:
-    gauth.Refresh()
-gauth.SaveCredentialsFile("token.json")
-drive = GoogleDrive(gauth)
 
 # ========= Константы =========
 MAIN_MENU = ReplyKeyboardMarkup(
@@ -200,9 +194,9 @@ async def add_balance(callback: CallbackQuery):
 
         payment_details = (
             "Реквизиты для оплаты:\n"
-            "🏦 Банк: ТестБанк\n"
-            "💳 Счёт: 1234 5678 9012 3456\n"
-            "👤 Получатель: Тестовый Получатель\n\n"
+            "🏦 Банк: Сбербанк(МИР)\n"
+            "💳 Счёт: 2202 2032 0643 2389\n"
+            "👤 Получатель: Золин М.П.\n\n"
         )
 
         user_id = msg.from_user.id
@@ -232,11 +226,21 @@ async def add_balance(callback: CallbackQuery):
             image_data = BytesIO(img_bytes.read())
 
             # 👉 Загружаем в Google Drive корректно
-            gfile = drive.CreateFile({'title': f"payment_{payment_id}.jpg"})
-            gfile.content = image_data  # передаём поток байтов напрямую
-            gfile.Upload()
-            gfile.InsertPermission({"role": "reader", "type": "anyone"})
-            file_url = gfile['alternateLink']
+            try:
+                gauth = GoogleAuth()
+                gauth.LoadCredentialsFile("token.json")
+                if gauth.access_token_expired:
+                    gauth.Refresh()
+                gauth.SaveCredentialsFile("token.json")
+                drive = GoogleDrive(gauth)
+                gfile = drive.CreateFile({'title': f"payment_{payment_id}.jpg"})
+                gfile.content = image_data  # передаём поток байтов напрямую
+                gfile.Upload()
+                gfile.InsertPermission({"role": "reader", "type": "anyone"})
+                file_url = gfile['alternateLink']
+            except:
+                await photo_msg.answer("Не удалось загрузить скриншот, отправьте скриншот в поддержку")
+                return
 
             # Сохраняем ссылку в БД
             save_receipt(payment_id, file_url)

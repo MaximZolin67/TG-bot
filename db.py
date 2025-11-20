@@ -1,4 +1,5 @@
 import sqlite3
+import time
 from config import DB_PATH
 
 def init_db():
@@ -36,7 +37,8 @@ def init_db():
         status TEXT DEFAULT 'на рассмотрении',
         order_name TEXT,
         details TEXT,
-        full_receipt TEXT
+        full_receipt TEXT,
+        data TEXT
     )''')
 
     conn.commit()
@@ -129,9 +131,13 @@ def get_payment(payment_id):
     return payment
 
 def set_payment_status(payment_id, status):
+    
+    a = time.localtime()
+    b = str(a.tm_mday) + "." + str(a.tm_mon) + "." + str(a.tm_year)
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute("UPDATE payments SET status = ? WHERE id = ?", (status, payment_id))
+    c.execute("UPDATE payments SET data = ? WHERE id = ?", (b, payment_id))
     conn.commit()
     conn.close()
 
