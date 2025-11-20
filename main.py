@@ -6,12 +6,15 @@ from pydrive2.auth import GoogleAuth
 from io import BytesIO
 from pydrive2.drive import GoogleDrive
 from aiogram.filters import Command
+from aiogram.fsm.state import State, StatesGroup
+from aiogram.fsm.context import FSMContext
 from aiogram.types import (
     InlineKeyboardButton,
     InlineKeyboardMarkup,
     ReplyKeyboardMarkup,
     KeyboardButton,
-    CallbackQuery
+    CallbackQuery,
+    Message
 )
 from config import TOKEN
 from db import (
@@ -31,11 +34,27 @@ from db import (
     is_admin,
 )
 
+
+# Состояния
+class PaymentStates(StatesGroup):
+    waiting_for_amount = State()
+    waiting_for_photo = State()
+
 logging.basicConfig(level=logging.INFO)
 
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
 
+gauth = GoogleAuth()
+gauth.LoadCredentialsFile("token.json")
+if gauth.credentials is None:
+    gauth.LocalWebserverAuth(access_type='offline')
+elif gauth.access_token_expired:
+    gauth.Refresh()
+else:
+    gauth.Authorize()
+gauth.SaveCredentialsFile("token.json")
+drive = GoogleDrive(gauth)
 
 # ========= Константы =========
 MAIN_MENU = ReplyKeyboardMarkup(
@@ -181,84 +200,75 @@ async def show_payment_options(callback: CallbackQuery):
     await callback.answer()
 
 @dp.callback_query(lambda c: c.data == "add_balance")
-async def add_balance(callback: CallbackQuery):
+async def add_balance(callback: CallbackQuery, state: FSMContext):
     await callback.message.edit_text("💳 Введите сумму пополнения (от 100 ₽):")
     await callback.answer()
+    await state.set_state(PaymentStates.waiting_for_amount)
 
-    @dp.message(F.text.regexp(r"^\d{3,20}$"))
-    async def handle_balance_input(msg: types.Message):
-        amount = int(msg.text)
-        if not (100 <= amount):
-            await msg.answer("❌ Сумма должна быть от 100 ₽.")
-            return
+@dp.message(PaymentStates.waiting_for_amount, F.text.regexp(r"^\d{3,20}$"))
+async def handle_balance_input(msg: Message, state: FSMContext):
+    amount = int(msg.text)
+    if amount < 100:
+        await msg.answer("❌ Сумма должна быть от 100 ₽.")
+        return
 
-        payment_details = (
+    payment_details = (
             "Реквизиты для оплаты:\n"
             "🏦 Банк: Сбербанк(МИР)\n"
             "💳 Счёт: 2202 2032 0643 2389\n"
             "👤 Получатель: Золин М.П.\n\n"
         )
 
-        user_id = msg.from_user.id
-        payment_id = create_payment(user_id, amount, "Пополнение баланса", payment_details)
+    user_id = msg.from_user.id
+    payment_id = create_payment(user_id, amount, "Пополнение баланса", payment_details)
 
-        await msg.answer(
-            f"💰 Пополнение баланса\n\n"
-            f"Номер счёта: {payment_id}\n"
-            f"Сумма: {amount} ₽\n"
-            f"{payment_details}"
-            "📸 Отправьте фото (скриншот оплаты)"
-        )
+    await msg.answer(
+        f"💰 Пополнение баланса\n\n"
+        f"Номер счёта: {payment_id}\n"
+        f"Сумма: {amount} ₽\n"
+        f"{payment_details}"
+        "📸 Отправьте фото (скриншот оплаты)"
+    )
 
-        # Ловим всё, кроме фото
-        @dp.message(~F.photo)
-        async def wrong_input(wmsg: types.Message):
-            await wmsg.answer("❗ Пожалуйста, отправьте именно *фото* (картинку), а не файл или текст.")
+    await state.update_data(payment_id=payment_id)
+    await state.set_state(PaymentStates.waiting_for_photo)
 
-        # Регистрируем ожидание фото
-        @dp.message(F.photo)
-        async def get_photo(photo_msg: types.Message):
-            # Получаем файл с Telegram
-            file = await photo_msg.bot.get_file(photo_msg.photo[-1].file_id)
-            img_bytes = await photo_msg.bot.download_file(file.file_path)
+@dp.message(PaymentStates.waiting_for_photo, ~F.photo)
+async def wrong_input(msg: Message):
+    await msg.answer("❗ Пожалуйста, отправьте именно *фото* (картинку), а не файл или текст.")
 
-            # Создаём временный бинарный объект
-            image_data = BytesIO(img_bytes.read())
+@dp.message(PaymentStates.waiting_for_photo, F.photo)
+async def get_photo(msg: Message, state: FSMContext):
+    data = await state.get_data()
+    payment_id = data['payment_id']
 
-            # 👉 Загружаем в Google Drive корректно
-            try:
-                gauth = GoogleAuth()
-                gauth.LoadCredentialsFile("token.json")
-                if gauth.access_token_expired:
-                    gauth.Refresh()
-                gauth.SaveCredentialsFile("token.json")
-                drive = GoogleDrive(gauth)
-                gfile = drive.CreateFile({'title': f"payment_{payment_id}.jpg"})
-                gfile.content = image_data  # передаём поток байтов напрямую
-                gfile.Upload()
-                gfile.InsertPermission({"role": "reader", "type": "anyone"})
-                file_url = gfile['alternateLink']
-            except:
-                await photo_msg.answer("Не удалось загрузить скриншот, отправьте скриншот в поддержку")
-                return
+    file = await msg.bot.get_file(msg.photo[-1].file_id)
+    img_bytes = await msg.bot.download_file(file.file_path)
 
-            # Сохраняем ссылку в БД
-            save_receipt(payment_id, file_url)
+    image_data = BytesIO(img_bytes.read())
 
-            # Показываем кнопки
-            keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="✅ Подтвердить оплату", callback_data=f"confirm_user_payment_{payment_id}")],
-                [InlineKeyboardButton(text="↩️ Назад", callback_data="balance_back")]
-            ])
+    try:
+        gfile = drive.CreateFile({'title': f"payment_{payment_id}.jpg"})
+        gfile.content = image_data  # передаём поток байтов напрямую
+        gfile.Upload()
+        gfile.InsertPermission({"role": "reader", "type": "anyone"})
+        file_url = gfile['alternateLink']
+    except:
+        await msg.answer("Не удалось загрузить скриншот, отправьте скриншот в поддержку")
+        return
+    save_receipt(payment_id, file_url)
 
-            await photo_msg.answer(
-                "✅ Фото получено и загружено!\nТеперь нажмите подтверждение 👇",
-                reply_markup=keyboard
-            )
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✅ Подтвердить оплату", callback_data=f"confirm_user_payment_{payment_id}")],
+        [InlineKeyboardButton(text="↩️ Назад", callback_data="balance_back")]
+    ])
 
-            # Снимаем временные хендлеры
-            dp.message.middleware.unregister(get_photo)
-            dp.message.middleware.unregister(handle_balance_input)
+    await msg.answer(
+        "✅ Фото получено и загружено!\nТеперь нажмите подтверждение 👇",
+        reply_markup=keyboard
+    )
+
+    await state.clear()
             
 # ========= Подтверждение оплаты =========
 @dp.callback_query(lambda c: c.data and c.data.startswith("confirm_user_payment_"))
