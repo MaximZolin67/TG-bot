@@ -55,6 +55,14 @@ else:
     gauth.Authorize()
 gauth.SaveCredentialsFile("token.json")
 drive = GoogleDrive(gauth)
+def disk_delete(payment_id):
+    file_name = f"payment_{payment_id}.jpg"
+    # Ищем файл по имени
+    file_list = drive.ListFile({'q': f"title='{file_name}'"}).GetList()
+    if file_list:
+        file = file_list[0]  # Берем первый найденный файл
+        file.Delete()
+    
 
 # ========= Константы =========
 MAIN_MENU = ReplyKeyboardMarkup(

@@ -1,5 +1,7 @@
 import sqlite3
 import time
+from main import disk_delete
+from datetime import datetime, timedelta
 from config import DB_PATH
 
 def init_db():
@@ -69,7 +71,7 @@ def get_all_payments():
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute("""
-        SELECT id, user_id, amount, order_name, status, full_receipt
+        SELECT id, user_id, amount, order_name, status, full_receipt, data
         FROM payments
         ORDER BY id DESC
     """)
@@ -210,3 +212,26 @@ def check_and_grant_referral_bonus(user_telegram_id):
             )
             conn.commit()
     conn.close()
+
+
+def delete_paid_payments():
+    to_delete=[]
+    payments = get_all_payments()
+    for payment in payments:
+        date_format = '%d.%m.%Y'
+        if payment[6] is None:
+            continue
+        given_date = datetime.strptime(payment[6], date_format)
+        current_date = datetime.now()
+        diff = current_date - given_date
+        if payment[4] == 'Оплачено' and diff > timedelta(days=3):
+            disk_delete(payment[0])
+            to_delete.append(payment[0])
+              
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    
+    c.execute("DELETE FROM payments WHERE id IN ({})".format(','.join(['?']*len(to_delete))), to_delete)
+    conn.commit()
+    conn.close()
+    return 
