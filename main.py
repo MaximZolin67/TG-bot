@@ -1,10 +1,10 @@
 import logging
+import os
+import yadisk
 import asyncio
 from math import ceil
 from aiogram import Bot, Dispatcher, types, F
-from pydrive2.auth import GoogleAuth
 from io import BytesIO
-from pydrive2.drive import GoogleDrive
 from aiogram.filters import Command
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.context import FSMContext
@@ -45,23 +45,8 @@ logging.basicConfig(level=logging.INFO)
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
 
-gauth = GoogleAuth()
-gauth.LoadCredentialsFile("token.json")
-if gauth.credentials is None:
-    gauth.LocalWebserverAuth(access_type='offline')
-elif gauth.access_token_expired:
-    gauth.Refresh()
-else:
-    gauth.Authorize()
-gauth.SaveCredentialsFile("token.json")
-drive = GoogleDrive(gauth)
-def disk_delete(payment_id):
-    file_name = f"payment_{payment_id}.jpg"
-    # Ищем файл по имени
-    file_list = drive.ListFile({'q': f"title='{file_name}'"}).GetList()
-    if file_list:
-        file = file_list[0]  # Берем первый найденный файл
-        file.Delete()
+client = yadisk.Client(token="y0__xC1u-jnBhiHgzwgz_XUvhUwj6DNwQhT3mnvFGK51vmM9kRlIo5wM6BEyQ")
+
     
 
 # ========= Константы =========
@@ -256,15 +241,19 @@ async def get_photo(msg: Message, state: FSMContext):
     image_data = BytesIO(img_bytes.read())
 
     try:
-        gfile = drive.CreateFile({'title': f"payment_{payment_id}.jpg"})
-        gfile.content = image_data  # передаём поток байтов напрямую
-        gfile.Upload()
-        gfile.InsertPermission({"role": "reader", "type": "anyone"})
-        file_url = gfile['alternateLink']
+        file_name = f"payment_{payment_id}.jpg"
+        file_path = f"/yadisk/{file_name}"
+        f = open(file_name, "w")
+        f.write(str(image_data))
+        f.close()
+        client.upload(file_name, file_path)
+        b = client.publish(file_path)
+        link = b.get_meta(file_path)
+        os.remove(file_name)
     except:
         await msg.answer("Не удалось загрузить скриншот, отправьте скриншот в поддержку")
         return
-    save_receipt(payment_id, file_url)
+    save_receipt(payment_id, link.public_url)
 
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="✅ Подтвердить оплату", callback_data=f"confirm_user_payment_{payment_id}")],

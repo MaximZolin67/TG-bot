@@ -1,6 +1,5 @@
 import sqlite3
 import time
-from main import disk_delete
 from datetime import datetime, timedelta
 from config import DB_PATH
 
@@ -213,8 +212,12 @@ def check_and_grant_referral_bonus(user_telegram_id):
             conn.commit()
     conn.close()
 
-
-def delete_paid_payments():
+def disk_delete(client, payment_id):
+    file_path = f"/yadisk/payment_{payment_id}.jpg"
+    # Ищем файл по имени
+    client.remove(file_path)
+    
+def delete_paid_payments(client):
     to_delete=[]
     payments = get_all_payments()
     for payment in payments:
@@ -225,7 +228,7 @@ def delete_paid_payments():
         current_date = datetime.now()
         diff = current_date - given_date
         if payment[4] == 'Оплачено' and diff > timedelta(days=3):
-            disk_delete(payment[0])
+            disk_delete(client, payment[0])
             to_delete.append(payment[0])
               
     conn = sqlite3.connect(DB_PATH)
