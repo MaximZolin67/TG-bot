@@ -3,5 +3,4 @@ shop.db
 __pycache__
 .idea
 data/
-client_secrets.json
-token.json
+token.txt

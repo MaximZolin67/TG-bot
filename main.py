@@ -45,7 +45,8 @@ logging.basicConfig(level=logging.INFO)
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
 
-client = yadisk.Client(token="y0__xC1u-jnBhiHgzwgz_XUvhUwj6DNwQhT3mnvFGK51vmM9kRlIo5wM6BEyQ")
+f = open("token.txt")
+client = yadisk.Client(token=f.readline())
 
     
 
