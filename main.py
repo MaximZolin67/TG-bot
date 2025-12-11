@@ -16,7 +16,7 @@ from aiogram.types import (
     CallbackQuery,
     Message
 )
-from config import TOKEN
+from config import BOT_TOKEN, YANDEX_TOKEN
 from db import (
     init_db,
     add_user,
@@ -42,11 +42,11 @@ class PaymentStates(StatesGroup):
 
 logging.basicConfig(level=logging.INFO)
 
-bot = Bot(token=TOKEN)
+bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
-f = open("token.txt")
-client = yadisk.Client(token=f.readline())
+
+client = yadisk.Client(token=YANDEX_TOKEN)
 
     
 

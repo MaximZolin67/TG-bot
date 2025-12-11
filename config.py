@@ -1,2 +1,3 @@
-TOKEN = "TOKEN"
+BOT_TOKEN = "TOKEN"
+YANDEX_TOKEN = "TOKEN"
 DB_PATH = "shop.db"

@@ -1,8 +1,9 @@
 from db import delete_paid_payments
+from config import(YANDEX_TOKEN)
 import time
 import yadisk
 f = open("token.txt")
-client = yadisk.Client(token=f.readline())
+client = yadisk.Client(token=YANDEX_TOKEN)
 while True:
     try:
         delete_paid_payments(client)
