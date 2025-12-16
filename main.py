@@ -239,14 +239,13 @@ async def get_photo(msg: Message, state: FSMContext):
     file = await msg.bot.get_file(msg.photo[-1].file_id)
     img_bytes = await msg.bot.download_file(file.file_path)
 
-    image_data = BytesIO(img_bytes.read())
+    image_data = img_bytes.read()
 
     try:
         file_name = f"payment_{payment_id}.jpg"
         file_path = f"/yadisk/{file_name}"
-        f = open(file_name, "w")
-        f.write(str(image_data))
-        f.close()
+        with open(file_name, "wb") as f:
+            f.write(image_data)
         client.upload(file_name, file_path)
         b = client.publish(file_path)
         link = b.get_meta(file_path)

@@ -2,7 +2,8 @@ import sqlite3
 DB_PATH = "shop.db"
 conn = sqlite3.connect(DB_PATH)
 c = conn.cursor()
-c.execute("UPDATE payments SET full_receipt = 'https://yadi.sk/d/742sfq2ojwnksQ' where id = 5 ") 
+# c.execute("update users set role = 'admin' where id = 1") 
+c.execute("delete from keys ") 
 conn.commit()
 conn.close()
 
