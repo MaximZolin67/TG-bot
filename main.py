@@ -292,29 +292,28 @@ async def confirm_payment(callback: CallbackQuery):
 # ========= Подтверждение платежа администратором =========
 @dp.message(Command("confirm"))
 async def admin_confirm_payment(msg: types.Message):
+    if not is_admin(msg.from_user.id):
+        await msg.answer("❌ Только администратор может подтверждать платежи.")
+        return
     args = msg.text.split()
     if len(args) < 2 or not args[1].isdigit():
         await msg.answer("⚠️ Использование: /confirm <payment_id>")
         return
-
-    payment_id = int(args[1])
-
-    if not is_admin(msg.from_user.id):
-        await msg.answer("❌ Только администратор может подтверждать платежи.")
-        return
-
+    for payment_id in args[1:]:
+        payment_id = int(payment_id)
+        
     # Получаем платёж
-    payment = get_payment(payment_id)
-    if not payment:
-        await msg.answer("❌ Платёж не найден.")
-        return
+        payment = get_payment(payment_id)
+        if not payment:
+            await msg.answer("❌ Платёж не найден.")
+            return
 
-    set_payment_status(payment_id, "Оплачено")
-    user_id = payment[1]
-    amount = payment[2]
-    update_balance(user_id, amount)
+        set_payment_status(payment_id, "Оплачено")
+        user_id = payment[1]
+        amount = payment[2]
+        update_balance(user_id, amount)
 
-    await msg.answer(f"✅ Платёж №{payment_id} подтверждён.\nБаланс пользователя {user_id} пополнен на {amount} ₽.")
+        await msg.answer(f"✅ Платёж №{payment_id} подтверждён.\nБаланс пользователя {user_id} пополнен на {amount} ₽.")
 
 
 # ========= Навигация назад =========
