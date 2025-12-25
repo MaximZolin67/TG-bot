@@ -4,7 +4,6 @@ import yadisk
 import asyncio
 from math import ceil
 from aiogram import Bot, Dispatcher, types, F
-from io import BytesIO
 from aiogram.filters import Command
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.context import FSMContext
@@ -76,7 +75,6 @@ async def start(msg: types.Message):
 @dp.message(F.text == "💰 Баланс")
 @dp.message(Command("balance"))
 async def show_balance(msg: types.Message):
-    check_and_grant_referral_bonus(msg.from_user.id)
     balance = get_balance(msg.from_user.id)
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="Пополнить баланс", callback_data="add_balance")]
@@ -148,6 +146,7 @@ async def show_payment_options(callback: CallbackQuery):
     if balance >= price:
         key = buy_key_by_product_id(product_id, user_id)
         if key:
+            check_and_grant_referral_bonus(user_id)
             await callback.message.edit_text(
                 f"✅ Покупка успешна!\nВаш ключ:\n<code>{key}</code>",
                 parse_mode="HTML"
